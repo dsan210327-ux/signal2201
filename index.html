@@ -69,7 +69,21 @@
   .next-card .stats .eta.go{color:var(--green);}
   .next-card .stats .eta.stop{color:var(--red);}
   .hr{height:1px;background:var(--line);margin:6px 0 4px;}
+  .next-card,.next-card+.hr{display:none;} /* 하단 다음지점 거리/초 숨김(상단 정류장 카드와 중복) */
 
+  /* 정류장 도착 안내 이미지 */
+  #stopCard{margin:0 0 6px;padding:8px 10px 6px;border-radius:14px;background:var(--panel);border:1px solid var(--line);flex-shrink:0;}
+  #stopCard .sc-top{display:flex;align-items:center;gap:6px;justify-content:space-between;}
+  #stopCard .sc-name{font-size:15px;font-weight:800;line-height:1.2;min-width:0;}
+  #stopCard .sc-name small{display:block;font-size:9.5px;color:var(--dim);font-weight:600;}
+  #stopCard .sc-state{flex-shrink:0;font-size:11px;font-weight:800;padding:3px 9px;border-radius:12px;color:#001018;background:var(--cyan);}
+  #stopCard.soon{border-color:#7a5a00;} #stopCard.soon .sc-state{background:var(--yellow);}
+  #stopCard.here{border-color:#1d7a3c;box-shadow:0 0 14px rgba(46,230,107,.35);} #stopCard.here .sc-state{background:var(--green);animation:scpulse .8s infinite alternate;}
+  @keyframes scpulse{from{opacity:1}to{opacity:.45}}
+  #stopCard svg{width:100%;height:auto;display:block;margin-top:2px;}
+  #stopCard .sc-row{display:flex;align-items:baseline;justify-content:space-between;gap:8px;}
+  #stopCard .sc-dist{font-size:26px;font-weight:800;} #stopCard .sc-dist small{font-size:12px;color:var(--dim);margin-left:2px;}
+  #stopCard .sc-eta{font-size:13px;color:var(--dim);font-weight:700;}
   #bottom{padding:8px 4px 2px;}
   .speedrow{display:flex;align-items:flex-end;gap:14px;}
   .speedrow .speed{font-size:38px;font-weight:800;line-height:1;}
@@ -99,7 +113,7 @@
     box-shadow:0 0 6px var(--cyan);}
   .cyclebar .arrive-tag{position:absolute;left:3px;font-size:8px;font-weight:800;color:#001018;background:var(--cyan);
     padding:0 3px;border-radius:3px;line-height:11px;}
-  #cyclewrap{width:100%;flex:1 1 0;min-height:100px;max-height:34vh;display:flex;gap:10px;
+  #cyclewrap{width:100%;flex:1 1 0;min-height:130px;max-height:46vh;display:flex;gap:10px;
     justify-content:center;align-items:stretch;padding:2px 0 6px;}
   .cyclebar{position:relative;flex:1;max-width:56px;border-radius:14px;overflow:hidden;
     border:1px solid var(--line);background:#000;display:flex;flex-direction:column;}
@@ -112,7 +126,7 @@
   .cyclebar .badge2{position:absolute;left:50%;transform:translateX(-50%);top:5px;
     background:rgba(0,0,0,.55);border:1px solid rgba(255,255,255,.25);color:#fff;font-size:10px;font-weight:800;
     padding:2px 6px;border-radius:8px;}
-  .cyclebar .name{position:absolute;bottom:3px;left:0;right:0;text-align:center;font-size:8.5px;color:var(--dim);}
+  .cyclebar .name{position:absolute;bottom:3px;left:0;right:0;text-align:center;font-size:10px;font-weight:700;color:#cfd6dd;text-shadow:0 0 3px #000;}
   .cyclebar .src{position:absolute;top:5px;right:5px;font-size:8px;color:var(--green);}
 
   /* 실제 신호데이터 업로드 패널 */
@@ -161,6 +175,11 @@
     <div id="timeline"><div class="rail"></div></div>
 
     <div id="center">
+      <div id="stopCard">
+        <div class="sc-top"><div class="sc-name" id="scName">-</div><div class="sc-state" id="scState">접근 중</div></div>
+        <div id="scSvg"></div>
+        <div class="sc-row"><div class="sc-dist"><span id="scDist">-</span><small>m</small></div><div class="sc-eta" id="scEta"></div></div>
+      </div>
       <div id="cyclewrap"></div>
       <div id="sigInfo">
         <div class="sigTitle"><span id="sigName">-</span><span class="badge" id="sigBadge">추정치</span></div>
@@ -230,6 +249,15 @@
       <button class="btn" id="stopClearBtn" style="border:none;">좌표 초기화</button>
     </div>
     <div id="stopApiStatus" style="margin-top:4px;font-size:10.5px;"></div>
+    <div class="row" style="margin-top:10px;padding-top:8px;border-top:1px dashed var(--line);">
+      <span style="color:#fff;font-weight:700;">신호등 위치 자동 찾기 — OpenStreetMap</span>
+    </div>
+    <div class="row" style="margin-top:6px;">
+      <button class="btn" id="osmFetchBtn" style="border:none;">신호등 찾기</button>
+      <button class="btn" id="osmClearBtn" style="border:none;">기본 신호로 되돌리기</button>
+    </div>
+    <div id="osmStatus" style="margin-top:4px;font-size:10.5px;"></div>
+    <div style="margin-top:4px;font-size:10px;opacity:.75;">정류장 좌표가 먼저 채워져 있어야 해요. 노선 도로 위 신호등만 골라 순서대로 넣고, 초록·노랑·빨강 길이는 추정치라 신호 앞에서 보정 버튼으로 맞춰 주세요.</div>
     <div id="stopMatchList"></div>
     <div style="margin-top:6px;font-size:10px;opacity:.75;">
       2201번 정류장 59곳을 정류장번호(없으면 이름+영종 범위)로 찾아 좌표를 채워요. 한 번 채우면 이 기기에
@@ -650,7 +678,7 @@ function buildBar(wp, arriveSec){
     <div class="now-line" style="bottom:${nowPct}%"></div>
     ${arriveHtml}
     <div class="badge2" style="color:${PH_COLOR[ph.phase]}">${Math.ceil(ph.left)}</div>
-    <div class="name">${wp.name.length>5?wp.name.slice(0,5):wp.name}</div>`;
+    <div class="name">${wp.name.length>6?wp.name.slice(0,6):wp.name}</div>`;
   return bar;
 }
 function renderCycles(){
@@ -665,6 +693,71 @@ function renderCycles(){
   if (ahead[1] !== undefined){ // 그 다음 신호는 흐리게 (참고용)
     const b = buildBar(waypoints[ahead[1]], NaN); b.classList.add('dim'); cycleWrap.appendChild(b);
   }
+}
+
+/* ===================== 정류장 도착 안내 이미지 =====================
+   다음 '정류장'(신호 지점 제외)까지: 직전 정류장 ● ──🚌── ◉ 다음 정류장 (사이의 신호등도 표시)
+   남은 거리 200m 이내 '곧 도착', 50m 이내 '도착' + 진동 */
+const SC_SOON_M = 200, SC_HERE_M = 50;
+let scAlert = { key:'', lvl:0 };
+function shortName(n,len){ n = String(n).replace(/\(.*?\)/g,''); return n.length>len ? n.slice(0,len)+'…' : n; }
+function renderStopCard(){
+  const card = document.getElementById('stopCard');
+  let ni = -1;
+  for (let k=Math.max(curIndex,0); k<waypoints.length; k++) if (waypoints[k].type==='stop'){ ni = k; break; }
+  if (ni < 0){
+    card.className=''; document.getElementById('scName').textContent='🏁 종점 구간입니다';
+    document.getElementById('scState').textContent='종점'; document.getElementById('scSvg').innerHTML='';
+    document.getElementById('scDist').textContent='-'; document.getElementById('scEta').textContent=''; return;
+  }
+  let pi = -1;
+  for (let k=ni-1; k>=0; k--) if (waypoints[k].type==='stop'){ pi = k; break; }
+  const nxt = waypoints[ni];
+  const dist = Math.max(0, cum[ni]-routePos);
+  const v = etaSpeed();
+  const lvl = dist <= SC_HERE_M ? 2 : dist <= SC_SOON_M ? 1 : 0;
+  card.className = lvl===2 ? 'here' : lvl===1 ? 'soon' : '';
+  document.getElementById('scState').textContent = lvl===2 ? '🚏 도착!' : lvl===1 ? '곧 도착' : '접근 중';
+  document.getElementById('scName').innerHTML = `${nxt.name}<small>다음 정류장${nxt.id?' · '+nxt.id:''}</small>`;
+  document.getElementById('scDist').textContent = Math.round(dist);
+  document.getElementById('scEta').textContent = lvl===2 ? '하차 준비' : (v>0 ? '약 '+fmtDur(dist/v)+' 뒤' : '정차중');
+  // 진동 알림(정류장마다 단계별 1회)
+  const key = direction+':'+ni;
+  if (scAlert.key !== key){ scAlert = { key, lvl: lvl }; }
+  else if (lvl > scAlert.lvl){
+    scAlert.lvl = lvl;
+    try{ if (navigator.vibrate) navigator.vibrate(lvl===2 ? [300,120,300,120,300] : [250]); }catch(e){}
+  }
+  // SVG
+  const X0=22, X1=278, Y=34;
+  const p = pi>=0 ? waypoints[pi] : null;
+  const startPos = p ? cum[pi] : Math.min(routePos, cum[ni]);
+  const span = Math.max(1, cum[ni]-startPos);
+  const frac = Math.max(0, Math.min(1, (routePos-startPos)/span));
+  const xBus = X0 + frac*(X1-X0);
+  let s = `<svg viewBox="0 0 300 66" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="다음 정류장까지 ${Math.round(dist)}미터">`;
+  s += `<line x1="${X0}" y1="${Y}" x2="${X1}" y2="${Y}" stroke="#2a323b" stroke-width="6" stroke-linecap="round"/>`;
+  s += `<line x1="${X0}" y1="${Y}" x2="${xBus.toFixed(1)}" y2="${Y}" stroke="#1fb6d8" stroke-width="6" stroke-linecap="round"/>`;
+  // 중간 신호등
+  const nowSec = Date.now()/1000;
+  for (let k=(pi>=0?pi+1:0); k<ni; k++){
+    const w = waypoints[k]; if (w.type!=='light') continue;
+    const f = Math.max(0, Math.min(1, (cum[k]-startPos)/span));
+    const x = X0 + f*(X1-X0);
+    const ph = phaseFor(w, nowSec).phase;
+    const col = ph==='green' ? '#2ee66b' : ph==='yellow' ? '#ffd23f' : '#ff4d4d';
+    s += `<rect x="${(x-4).toFixed(1)}" y="${Y-17}" width="8" height="14" rx="3" fill="#000" stroke="#3a434d"/><circle cx="${x.toFixed(1)}" cy="${Y-10}" r="2.6" fill="${col}"/><line x1="${x.toFixed(1)}" y1="${Y-3}" x2="${x.toFixed(1)}" y2="${Y}" stroke="#3a434d"/>`;
+  }
+  // 정류장 표시
+  const ring = lvl===2 ? '#2ee66b' : lvl===1 ? '#ffd23f' : '#1fb6d8';
+  s += `<circle cx="${X0}" cy="${Y}" r="6" fill="#0b0f14" stroke="#7d8793" stroke-width="2.5"/>`;
+  s += `<circle cx="${X1}" cy="${Y}" r="10" fill="#0b0f14" stroke="${ring}" stroke-width="4"/><text x="${X1}" y="${Y+4.5}" font-size="12" text-anchor="middle">🚏</text>`;
+  // 버스
+  s += `<text x="${xBus.toFixed(1)}" y="${Y-8}" font-size="28" text-anchor="middle">🚌</text>`;
+  s += `<text x="${X0}" y="62" font-size="9.5" fill="#7d8793" text-anchor="start">${p?shortName(p.name,7):'출발'}</text>`;
+  s += `<text x="${X1}" y="62" font-size="9.5" fill="#e6ebf0" text-anchor="end">${shortName(nxt.name,8)}</text>`;
+  s += `</svg>`;
+  document.getElementById('scSvg').innerHTML = s;
 }
 
 /* ===================== 이동/틱 ===================== */
@@ -688,6 +781,7 @@ function tick(){
   document.getElementById('speedVal').textContent = Math.round(speedKmh);
 
   renderCenter();
+  renderStopCard();
   renderCycles();
   renderSignalInfo();
   updateTimelineIcons();
@@ -1045,7 +1139,7 @@ function inBox(c){ return c.lat>=BOX.latMin && c.lat<=BOX.latMax && c.lng>=BOX.l
 const COORD_KEY = 'stopcoord2201_v1';
 function saveCoords(){
   const o = {};
-  ROUTE_FORWARD.concat(ROUTE_BACKWARD).forEach(w=>{ if (hasCoord(w)) o[w.id] = [w.lat, w.lng]; });
+  ROUTE_FORWARD.concat(ROUTE_BACKWARD).forEach(w=>{ if (w.id && hasCoord(w)) o[w.id] = [w.lat, w.lng]; });
   saveJSON(COORD_KEY, o);
 }
 function loadCoords(){
@@ -1058,8 +1152,8 @@ function loadCoords(){
 }
 function shareSameIdCoords(){ // 양방향에 같은 번호(예: 신명스카이뷰후문)가 있으면 좌표 공유
   const all = ROUTE_FORWARD.concat(ROUTE_BACKWARD), by = {};
-  all.forEach(w=>{ if (hasCoord(w)) by[w.id] = w; });
-  all.forEach(w=>{ if (!hasCoord(w) && by[w.id]){ w.lat = by[w.id].lat; w.lng = by[w.id].lng; } });
+  all.forEach(w=>{ if (w.id && hasCoord(w)) by[w.id] = w; });
+  all.forEach(w=>{ if (w.id && !hasCoord(w) && by[w.id]){ w.lat = by[w.id].lat; w.lng = by[w.id].lng; } });
 }
 async function fetchStopCandidates(query, key, endpoint, field='정류장명', op='LIKE', perPage=100){
   const url = `${endpoint}${endpoint.includes('?')?'&':'?'}page=1&perPage=${perPage}&serviceKey=${encodeURIComponent(key)}&cond[${field}::${op}]=${encodeURIComponent(query)}`;
@@ -1123,6 +1217,7 @@ document.getElementById('stopFetchBtn').addEventListener('click', async ()=>{
   stopApiStatusEl.style.color = have === total ? 'var(--green)' : 'var(--yellow)';
   refreshWaypointsKeepState();
   renderStopMatchList();
+  if (have >= 2) await fetchOsmLights();
 });
 document.getElementById('stopClearBtn').addEventListener('click', ()=>{
   ROUTE_FORWARD.concat(ROUTE_BACKWARD).forEach(w=>{ delete w.lat; delete w.lng; });
@@ -1174,6 +1269,148 @@ function renderStopMatchList(){
     stopMatchListEl.appendChild(row);
   });
 }
+
+/* ===================== 신호등 위치 자동 찾기 (OpenStreetMap) =====================
+   1) 노선 주변 신호등(highway=traffic_signals) 좌표를 Overpass API로 가져와 기기에 저장
+   2) 35m 이내 신호등은 한 교차로로 묶고, 정류장을 이은 노선에서 30m 이내인 것만 사용
+   3) 정류장 사이 올바른 위치(거리)에 신호 지점으로 끼워 넣음 → GPS 위치 기준 '앞 신호'가 자동으로 정해짐 */
+const OSM_KEY = 'osmsig2201_v1';
+const osmStatusEl = document.getElementById('osmStatus');
+let BASE = null; // { f:{stops,legacy,orig}, b:{...} }
+function prepBase(){
+  const mk = arr=>{
+    arr.forEach(w=>{ w.origGap = w.gap; });
+    const stops = [], legacy = []; let pend = 0;
+    arr.forEach((w,i)=>{
+      if (w.type==='light'){ legacy.push(w); pend += (w.gap||0); return; }
+      w.baseGap = i===0 ? 0 : (w.gap||0) + pend; pend = 0;
+      stops.push(w);
+    });
+    return { stops, legacy, orig: arr.slice() };
+  };
+  BASE = { f: mk(ROUTE_FORWARD), b: mk(ROUTE_BACKWARD) };
+}
+function clusterOsm(nodes){
+  const cl = [];
+  nodes.forEach(n=>{
+    let hit = null;
+    for (const c of cl){ if (haversineM(c.lat,c.lng,n[0],n[1]) <= 35){ hit = c; break; } }
+    if (hit){ hit.lat = (hit.lat*hit.n + n[0])/(hit.n+1); hit.lng = (hit.lng*hit.n + n[1])/(hit.n+1); hit.n++; if (!hit.name && n[2]) hit.name = n[2]; }
+    else cl.push({ lat:n[0], lng:n[1], n:1, name:n[2]||'' });
+  });
+  return cl;
+}
+function composeWithLights(B, clusters){
+  const stops = B.stops, c = [0];
+  for (let i=1;i<stops.length;i++) c.push(c[i-1] + (stops[i].baseGap||0));
+  const M = []; stops.forEach((w,i)=>{ if (hasCoord(w)) M.push(i); });
+  if (M.length < 2) return null;
+  const found = [];
+  clusters.forEach(cl=>{
+    let best = null;
+    for (let j=0;j<M.length-1;j++){
+      const A = stops[M[j]], Bw = stops[M[j+1]], refLat = (A.lat+Bw.lat)/2;
+      const P = toLocalXY(cl.lat,cl.lng,refLat), a = toLocalXY(A.lat,A.lng,refLat), b = toLocalXY(Bw.lat,Bw.lng,refLat);
+      const abx=b.x-a.x, aby=b.y-a.y, len2 = abx*abx+aby*aby || 1e-6;
+      let t = ((P.x-a.x)*abx + (P.y-a.y)*aby)/len2; t = Math.max(0,Math.min(1,t));
+      const d = Math.hypot(P.x-(a.x+abx*t), P.y-(a.y+aby*t));
+      if (!best || d < best.d) best = { j, t, d };
+    }
+    if (best && best.d <= 30){
+      found.push({ cl, pos: c[M[best.j]] + best.t*(c[M[best.j+1]]-c[M[best.j]]) });
+    }
+  });
+  found.sort((x,y)=>x.pos-y.pos);
+  const uniq = [];
+  found.forEach(f=>{ const last = uniq[uniq.length-1]; if (!last || f.pos - last.pos > 30) uniq.push(f); });
+  if (!uniq.length) return { route:null, count:0 };
+  // 신호 정의(이름/키/주기)
+  const lightDefs = uniq.map(f=>{
+    let leg = null;
+    for (const L of B.legacy){ if (hasCoord(L) && haversineM(L.lat,L.lng,f.cl.lat,f.cl.lng) <= 150){ leg = L; break; } }
+    return { pos:f.pos, cl:f.cl, leg };
+  });
+  // 정류장 사이에 끼워 넣기
+  const out = []; let prevPos = 0, li = 0;
+  stops.forEach((st,i)=>{
+    while (li < lightDefs.length && lightDefs[li].pos < c[i] - 0.5){
+      const d = lightDefs[li]; li++;
+      let pos = Math.max(prevPos + 5, Math.min(c[i] - 5, d.pos));
+      if (c[i] - prevPos < 12) pos = (prevPos + c[i])/2;
+      const nm = d.leg ? d.leg.name : (d.cl.name || (shortName(st.name,7) + ' 앞 신호'));
+      out.push({ type:'light', name:nm, id:'', gap:pos-prevPos,
+        sig: d.leg ? d.leg.sig : ('osm:' + d.cl.lat.toFixed(4) + ',' + d.cl.lng.toFixed(4)),
+        cycleDefault: d.leg ? d.leg.cycleDefault : { green:36, yellow:3, red:42 },
+        lat:d.cl.lat, lng:d.cl.lng, auto:true });
+      prevPos = pos;
+    }
+    st.gap = i===0 ? 0 : c[i] - prevPos;
+    out.push(st); prevPos = c[i];
+  });
+  return { route: out, count: uniq.length };
+}
+function applyOsmLights(nodes){
+  if (!BASE) prepBase();
+  const cl = clusterOsm(nodes);
+  const rf = composeWithLights(BASE.f, cl), rb = composeWithLights(BASE.b, cl);
+  let nf = 0, nb = 0;
+  if (rf && rf.route){ ROUTE_FORWARD = rf.route; nf = rf.count; }
+  if (rb && rb.route){ ROUTE_BACKWARD = rb.route; nb = rb.count; }
+  return { nf, nb, clusters: cl.length };
+}
+function revertLights(){
+  if (!BASE) return;
+  [BASE.f, BASE.b].forEach(B=>{ B.orig.forEach(w=>{ w.gap = w.origGap; }); });
+  ROUTE_FORWARD = BASE.f.orig.slice(); ROUTE_BACKWARD = BASE.b.orig.slice();
+}
+async function overpassPost(q){
+  const eps = ['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter','https://maps.mail.ru/osm/tools/overpass/api/interpreter'];
+  let lastErr = null;
+  for (const ep of eps){
+    try{
+      const ac = new AbortController(); const to = setTimeout(()=>ac.abort(), 30000);
+      const res = await fetch(ep, { method:'POST', body:'data='+encodeURIComponent(q),
+        headers:{'Content-Type':'application/x-www-form-urlencoded'}, signal:ac.signal });
+      clearTimeout(to);
+      if (!res.ok) throw new Error('HTTP '+res.status);
+      return await res.json();
+    }catch(e){ lastErr = e; }
+  }
+  throw lastErr || new Error('연결 실패');
+}
+async function fetchOsmLights(){
+  const pts = ROUTE_FORWARD.concat(ROUTE_BACKWARD).filter(w=>w.type==='stop' && hasCoord(w));
+  if (pts.length < 2){
+    osmStatusEl.textContent = '먼저 위의 "정류장 좌표 조회"로 정류장 좌표를 채워 주세요.'; osmStatusEl.style.color = 'var(--yellow)';
+    return false;
+  }
+  osmStatusEl.textContent = '신호등 위치 불러오는 중...'; osmStatusEl.style.color = 'var(--dim)';
+  const lats = pts.map(w=>w.lat), lngs = pts.map(w=>w.lng), pad = 0.004;
+  const bb = [Math.min(...lats)-pad, Math.min(...lngs)-pad, Math.max(...lats)+pad, Math.max(...lngs)+pad].map(v=>v.toFixed(5)).join(',');
+  try{
+    const json = await overpassPost(`[out:json][timeout:25];node["highway"="traffic_signals"](${bb});out body;`);
+    const nodes = (json.elements||[]).filter(e=>typeof e.lat==='number').map(e=>[e.lat, e.lon, (e.tags && e.tags.name) || '']);
+    if (!nodes.length) throw new Error('이 지역에서 신호등 데이터를 찾지 못했어요');
+    saveJSON(OSM_KEY, { ts:Date.now(), nodes });
+    const r = applyOsmLights(nodes);
+    refreshWaypointsKeepState(); renderStopMatchList(); renderMatchList();
+    if (r.nf + r.nb === 0){
+      osmStatusEl.textContent = `주변 신호등 ${nodes.length}곳을 받았지만 노선 도로 위에서는 찾지 못해 기본 신호를 그대로 써요.`; osmStatusEl.style.color = 'var(--yellow)';
+    } else {
+      osmStatusEl.textContent = `신호등 적용 완료: 정방향 ${r.nf}곳 · 회차 ${r.nb}곳 (주변 ${nodes.length}곳 중, 기기에 저장됨)`; osmStatusEl.style.color = 'var(--green)';
+    }
+    return true;
+  }catch(err){
+    osmStatusEl.textContent = '신호등 조회 실패: ' + err.message + ' — 잠시 뒤 다시 눌러 주세요. (기본 신호로 동작 중)'; osmStatusEl.style.color = 'var(--red)';
+    return false;
+  }
+}
+document.getElementById('osmFetchBtn').addEventListener('click', fetchOsmLights);
+document.getElementById('osmClearBtn').addEventListener('click', ()=>{
+  saveJSON(OSM_KEY, {}); revertLights();
+  refreshWaypointsKeepState(); renderStopMatchList(); renderMatchList();
+  osmStatusEl.textContent = '기본(수동 지정) 신호 2곳으로 되돌렸어요.'; osmStatusEl.style.color = 'var(--dim)';
+});
 
 /* ===================== 지도(Leaflet) ===================== */
 let map = null, mapMarkersLayer = null, mapPolyline = null, mapPosMarker = null, mapPosCircle = null;
@@ -1240,8 +1477,16 @@ if ('serviceWorker' in navigator && (location.protocol === 'http:' || location.p
 }
 
 /* ===================== 초기화 ===================== */
+prepBase();
 const savedCoordCount = loadCoords();
+shareSameIdCoords();
+const osmCache = loadJSON(OSM_KEY);
+if (savedCoordCount && Array.isArray(osmCache.nodes) && osmCache.nodes.length){
+  const r0 = applyOsmLights(osmCache.nodes);
+  osmStatusEl.textContent = `저장된 신호등 적용: 정방향 ${r0.nf}곳 · 회차 ${r0.nb}곳`; osmStatusEl.style.color = 'var(--green)';
+}
 resetRoute();
+if (savedCoordCount >= 2 && !(Array.isArray(osmCache.nodes) && osmCache.nodes.length)) setTimeout(fetchOsmLights, 1500);
 if (savedCoordCount) { stopApiStatusEl.textContent = `저장된 정류장 좌표 ${savedCoordCount}곳을 불러왔어요.`; stopApiStatusEl.style.color = 'var(--green)'; }
 renderCenter();
 renderCycles();
