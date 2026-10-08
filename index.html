@@ -1296,10 +1296,77 @@ function clusterOsm(nodes){
   nodes.forEach(n=>{
     let hit = null;
     for (const c of cl){ if (haversineM(c.lat,c.lng,n[0],n[1]) <= 25){ hit = c; break; } }
-    if (hit){ hit.lat = (hit.lat*hit.n + n[0])/(hit.n+1); hit.lng = (hit.lng*hit.n + n[1])/(hit.n+1); hit.n++; if (!hit.name && n[2]) hit.name = n[2]; }
-    else cl.push({ lat:n[0], lng:n[1], n:1, name:n[2]||'' });
+    if (hit){ hit.lat = (hit.lat*hit.n + n[0])/(hit.n+1); hit.lng = (hit.lng*hit.n + n[1])/(hit.n+1); hit.n++; if (!hit.name && n[2]) hit.name = n[2]; if (n[3]) hit.man = true; }
+    else cl.push({ lat:n[0], lng:n[1], n:1, name:n[2]||'', man:!!n[3] });
   });
   return cl;
+}
+/* 도로 모양: 정류장 사이를 실제 도로(OSM)로 이은 경로를 기기에 저장해 두고, 신호등이 그 도로 위에 있는지 판단 */
+const ROAD_KEY = 'osmroad2201_v1';
+let ROADCACHE = null;
+function roadPaths(){ if (!ROADCACHE) ROADCACHE = loadJSON(ROAD_KEY).paths || {}; return ROADCACHE; }
+function roadPathFor(A,B){ const p = roadPaths()[A.id+'>'+B.id]; return Array.isArray(p) && p.length>=2 ? p : null; }
+function heapPush(h,x){ h.push(x); let i=h.length-1; while(i>0){ const p=(i-1)>>1; if(h[p][0]<=h[i][0]) break; [h[p],h[i]]=[h[i],h[p]]; i=p; } }
+function heapPop(h){ const top=h[0], last=h.pop(); if(h.length){ h[0]=last; let i=0; for(;;){ let l=2*i+1,r=l+1,m=i; if(l<h.length&&h[l][0]<h[m][0]) m=l; if(r<h.length&&h[r][0]<h[m][0]) m=r; if(m===i) break; [h[m],h[i]]=[h[i],h[m]]; i=m; } } return top; }
+async function fetchRoadPaths(){
+  const seqs = [BASE.f.stops, BASE.b.stops].map(a=>a.filter(hasCoord));
+  const line = sq=>sq.map(w=>w.lat.toFixed(5)+','+w.lng.toFixed(5)).join(',');
+  const cls = 'motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street|motorway_link|trunk_link|primary_link|secondary_link|tertiary_link';
+  const q = '[out:json][timeout:50];(' + seqs.filter(a=>a.length>=2).map(a=>`way["highway"~"^(${cls})$"](around:300,${line(a)});`).join('') + ');out geom;';
+  const json = await overpassPost(q);
+  const pos = new Map(), adj = new Map();
+  const addNode = (id,la,ln)=>{ if(!pos.has(id)){ pos.set(id,[la,ln]); adj.set(id,[]); } };
+  const addEdge = (a,b,w)=>{ adj.get(a).push([b,w]); adj.get(b).push([a,w]); };
+  (json.elements||[]).forEach(el=>{
+    if (el.type!=='way' || !el.geometry || !el.nodes || el.geometry.length!==el.nodes.length) return;
+    const g = el.geometry, nd = el.nodes;
+    for (let i=0;i<g.length;i++) if (g[i]) addNode(nd[i], g[i].lat, g[i].lon);
+    for (let i=0;i<g.length-1;i++){
+      if (!g[i] || !g[i+1]) continue;
+      const d = haversineM(g[i].lat,g[i].lon,g[i+1].lat,g[i+1].lon);
+      const n = Math.max(1, Math.ceil(d/25)); let prev = nd[i];
+      for (let k=1;k<n;k++){
+        const id = 'v'+el.id+'_'+i+'_'+k, t = k/n;
+        addNode(id, g[i].lat+(g[i+1].lat-g[i].lat)*t, g[i].lon+(g[i+1].lon-g[i].lon)*t);
+        addEdge(prev,id,d/n); prev = id;
+      }
+      addEdge(prev, nd[i+1], d/n);
+    }
+  });
+  if (pos.size < 10) throw new Error('도로 데이터 없음');
+  const ids = [...pos.keys()];
+  const snap = w=>{
+    let best=null, bd=1e12; const cl=Math.cos(w.lat*Math.PI/180);
+    for (const id of ids){ const p=pos.get(id), dy=(p[0]-w.lat)*111320, dx=(p[1]-w.lng)*111320*cl, d=dx*dx+dy*dy; if(d<bd){ bd=d; best=id; } }
+    return Math.sqrt(bd) <= 120 ? best : null;
+  };
+  const paths = {}; let ok = 0, tot = 0;
+  seqs.forEach(sq=>{
+    for (let i=0;i<sq.length-1;i++){
+      const A=sq[i], B=sq[i+1], key=A.id+'>'+B.id;
+      if (paths[key]) continue;
+      tot++;
+      const sa=snap(A), sb=snap(B); if(!sa||!sb||sa===sb) continue;
+      const straight = haversineM(A.lat,A.lng,B.lat,B.lng), limit = straight*2.5+300;
+      const dist = new Map([[sa,0]]), prev = new Map(), heap = [[0,sa]], done = new Set();
+      while (heap.length){
+        const [d,u] = heapPop(heap);
+        if (done.has(u)) continue; done.add(u);
+        if (u===sb) break; if (d>limit) break;
+        for (const [v,w] of adj.get(u)){ const nd2=d+w; if(nd2<(dist.has(v)?dist.get(v):1e12)){ dist.set(v,nd2); prev.set(v,u); heapPush(heap,[nd2,v]); } }
+      }
+      if (!done.has(sb)) continue;
+      const rev = []; for (let u=sb; u!==undefined; u=prev.get(u)) rev.push(pos.get(u));
+      rev.reverse();
+      const out = [[A.lat,A.lng]]; let last = out[0];
+      rev.forEach(p=>{ if (haversineM(last[0],last[1],p[0],p[1]) >= 10){ last=[+p[0].toFixed(5), +p[1].toFixed(5)]; out.push(last); } });
+      out.push([B.lat,B.lng]);
+      paths[key] = out; ok++;
+    }
+  });
+  if (!ok) throw new Error('도로 경로를 잇지 못했어요');
+  saveJSON(ROAD_KEY, { ts:Date.now(), paths }); ROADCACHE = null;
+  return { ok, tot };
 }
 function composeWithLights(B, clusters){
   const stops = B.stops, c = [0];
@@ -1307,18 +1374,30 @@ function composeWithLights(B, clusters){
   const M = []; stops.forEach((w,i)=>{ if (hasCoord(w)) M.push(i); });
   if (M.length < 2) return null;
   const found = [];
+  const pairs = [];
+  for (let j=0;j<M.length-1;j++){
+    const A = stops[M[j]], Bw = stops[M[j+1]], refLat = A.lat;
+    const rp = roadPathFor(A,Bw);
+    const poly = rp || [[A.lat,A.lng],[Bw.lat,Bw.lng]];
+    const xy = poly.map(q=>toLocalXY(q[0],q[1],refLat)), cm = [0];
+    for (let k=1;k<xy.length;k++) cm.push(cm[k-1] + Math.hypot(xy[k].x-xy[k-1].x, xy[k].y-xy[k-1].y));
+    pairs.push({ xy, cm, total:cm[cm.length-1]||1, road:!!rp, refLat });
+  }
   clusters.forEach(cl=>{
     let best = null;
-    for (let j=0;j<M.length-1;j++){
-      const A = stops[M[j]], Bw = stops[M[j+1]], refLat = (A.lat+Bw.lat)/2;
-      const P = toLocalXY(cl.lat,cl.lng,refLat), a = toLocalXY(A.lat,A.lng,refLat), b = toLocalXY(Bw.lat,Bw.lng,refLat);
-      const abx=b.x-a.x, aby=b.y-a.y, len2 = abx*abx+aby*aby || 1e-6;
-      let t = ((P.x-a.x)*abx + (P.y-a.y)*aby)/len2; t = Math.max(0,Math.min(1,t));
-      const d = Math.hypot(P.x-(a.x+abx*t), P.y-(a.y+aby*t));
-      if (!best || d < best.d) best = { j, t, d };
-    }
-    if (best && best.d <= 45){
-      found.push({ cl, pos: c[M[best.j]] + best.t*(c[M[best.j+1]]-c[M[best.j]]) });
+    pairs.forEach((pr,j)=>{
+      const P = toLocalXY(cl.lat,cl.lng,pr.refLat);
+      for (let k=0;k<pr.xy.length-1;k++){
+        const a = pr.xy[k], b = pr.xy[k+1], abx=b.x-a.x, aby=b.y-a.y, len2 = abx*abx+aby*aby || 1e-6;
+        let t = ((P.x-a.x)*abx + (P.y-a.y)*aby)/len2; t = Math.max(0,Math.min(1,t));
+        const d = Math.hypot(P.x-(a.x+abx*t), P.y-(a.y+aby*t));
+        if (!best || d < best.d) best = { j, d, f:(pr.cm[k] + t*Math.sqrt(len2))/pr.total, road:pr.road, total:pr.total };
+      }
+    });
+    if (!best) return;
+    const tol = cl.man ? 90 : (best.road ? 45 : Math.min(120, 45 + 0.04*best.total));
+    if (best.d <= tol){
+      found.push({ cl, pos: c[M[best.j]] + best.f*(c[M[best.j+1]]-c[M[best.j]]) });
     }
   });
   found.sort((x,y)=>x.pos-y.pos);
@@ -1395,12 +1474,16 @@ async function fetchOsmLights(){
     const nodes = (json.elements||[]).filter(e=>typeof e.lat==='number').map(e=>[e.lat, e.lon, (e.tags && e.tags.name) || '']);
     if (!nodes.length) throw new Error('이 지역에서 신호등 데이터를 찾지 못했어요');
     saveJSON(OSM_KEY, { ts:Date.now(), nodes });
+    let roadMsg = '';
+    osmStatusEl.textContent = '도로 모양 불러오는 중...';
+    try{ const rr = await fetchRoadPaths(); roadMsg = ` · 도로 연결 ${rr.ok}/${rr.tot}구간`; }
+    catch(e2){ roadMsg = ' · 도로 모양 조회 실패(직선 기준으로 계산)'; }
     const r = applyOsmLights(nodes);
     refreshWaypointsKeepState(); renderStopMatchList(); renderMatchList();
     if (r.nf + r.nb === 0){
       osmStatusEl.textContent = `주변 신호등 ${nodes.length}곳을 받았지만 노선 도로 위에서는 찾지 못해 기본 신호를 그대로 써요.`; osmStatusEl.style.color = 'var(--yellow)';
     } else {
-      osmStatusEl.textContent = `신호등 적용 완료: 정방향 ${r.nf}곳 · 회차 ${r.nb}곳 (주변 ${nodes.length}곳 중, 기기에 저장됨) — 정방향: ` + ROUTE_FORWARD.filter(w=>w.type==='light').map(w=>shortName(w.name,8)).join(' · '); osmStatusEl.style.color = 'var(--green)';
+      osmStatusEl.textContent = `신호등 적용 완료: 정방향 ${r.nf}곳 · 회차 ${r.nb}곳 (주변 ${nodes.length}곳 중${roadMsg}, 기기에 저장됨) — 정방향: ` + ROUTE_FORWARD.filter(w=>w.type==='light').map(w=>shortName(w.name,8)).join(' · '); osmStatusEl.style.color = 'var(--green)';
     }
     return true;
   }catch(err){
@@ -1416,7 +1499,7 @@ document.getElementById('addSigBtn').addEventListener('click', ()=>{
   if (!lastRaw || (Date.now() - lastRaw.ts) > 15000){ flash('GPS 대기'); return; }
   const m = loadJSON(MANUAL_KEY); const list = Array.isArray(m.list) ? m.list : [];
   if (list.some(n=>haversineM(n[0],n[1],lastRaw.lat,lastRaw.lng) < 40)){ flash('이미 있음'); return; }
-  list.push([lastRaw.lat, lastRaw.lng, '직접 추가 신호']);
+  list.push([lastRaw.lat, lastRaw.lng, '직접 추가 신호', 1]);
   saveJSON(MANUAL_KEY, { list });
   const c = loadJSON(OSM_KEY);
   applyOsmLights(Array.isArray(c.nodes) ? c.nodes : []);
@@ -1424,7 +1507,7 @@ document.getElementById('addSigBtn').addEventListener('click', ()=>{
   flash('추가됨 ✓');
 });
 document.getElementById('osmClearBtn').addEventListener('click', ()=>{
-  saveJSON(OSM_KEY, {}); revertLights();
+  saveJSON(OSM_KEY, {}); saveJSON(ROAD_KEY, {}); ROADCACHE = null; revertLights();
   refreshWaypointsKeepState(); renderStopMatchList(); renderMatchList();
   osmStatusEl.textContent = '기본(수동 지정) 신호 2곳으로 되돌렸어요.'; osmStatusEl.style.color = 'var(--dim)';
 });
