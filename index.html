@@ -168,6 +168,7 @@
     <div class="spacer"></div>
     <div class="btn" id="mapToggle">지도</div>
     <div class="btn" id="dataToggle">실제 신호데이터</div>
+    <div class="btn" id="addSigBtn">＋신호등</div>
     <div class="btn" id="gpsToggle">GPS 사용</div>
   </header>
 
@@ -1294,7 +1295,7 @@ function clusterOsm(nodes){
   const cl = [];
   nodes.forEach(n=>{
     let hit = null;
-    for (const c of cl){ if (haversineM(c.lat,c.lng,n[0],n[1]) <= 35){ hit = c; break; } }
+    for (const c of cl){ if (haversineM(c.lat,c.lng,n[0],n[1]) <= 25){ hit = c; break; } }
     if (hit){ hit.lat = (hit.lat*hit.n + n[0])/(hit.n+1); hit.lng = (hit.lng*hit.n + n[1])/(hit.n+1); hit.n++; if (!hit.name && n[2]) hit.name = n[2]; }
     else cl.push({ lat:n[0], lng:n[1], n:1, name:n[2]||'' });
   });
@@ -1316,7 +1317,7 @@ function composeWithLights(B, clusters){
       const d = Math.hypot(P.x-(a.x+abx*t), P.y-(a.y+aby*t));
       if (!best || d < best.d) best = { j, t, d };
     }
-    if (best && best.d <= 30){
+    if (best && best.d <= 45){
       found.push({ cl, pos: c[M[best.j]] + best.t*(c[M[best.j+1]]-c[M[best.j]]) });
     }
   });
@@ -1349,9 +1350,11 @@ function composeWithLights(B, clusters){
   });
   return { route: out, count: uniq.length };
 }
+const MANUAL_KEY = 'manualsig2201_v1';
+function manualNodes(){ const m = loadJSON(MANUAL_KEY); return Array.isArray(m.list) ? m.list : []; }
 function applyOsmLights(nodes){
   if (!BASE) prepBase();
-  const cl = clusterOsm(nodes);
+  const cl = clusterOsm((nodes||[]).concat(manualNodes()));
   const rf = composeWithLights(BASE.f, cl), rb = composeWithLights(BASE.b, cl);
   let nf = 0, nb = 0;
   if (rf && rf.route){ ROUTE_FORWARD = rf.route; nf = rf.count; }
@@ -1388,7 +1391,7 @@ async function fetchOsmLights(){
   const lats = pts.map(w=>w.lat), lngs = pts.map(w=>w.lng), pad = 0.004;
   const bb = [Math.min(...lats)-pad, Math.min(...lngs)-pad, Math.max(...lats)+pad, Math.max(...lngs)+pad].map(v=>v.toFixed(5)).join(',');
   try{
-    const json = await overpassPost(`[out:json][timeout:25];node["highway"="traffic_signals"](${bb});out body;`);
+    const json = await overpassPost(`[out:json][timeout:25];(node["highway"="traffic_signals"](${bb});node["crossing"="traffic_signals"](${bb});node["crossing:signals"="yes"](${bb}););out body;`);
     const nodes = (json.elements||[]).filter(e=>typeof e.lat==='number').map(e=>[e.lat, e.lon, (e.tags && e.tags.name) || '']);
     if (!nodes.length) throw new Error('이 지역에서 신호등 데이터를 찾지 못했어요');
     saveJSON(OSM_KEY, { ts:Date.now(), nodes });
@@ -1397,7 +1400,7 @@ async function fetchOsmLights(){
     if (r.nf + r.nb === 0){
       osmStatusEl.textContent = `주변 신호등 ${nodes.length}곳을 받았지만 노선 도로 위에서는 찾지 못해 기본 신호를 그대로 써요.`; osmStatusEl.style.color = 'var(--yellow)';
     } else {
-      osmStatusEl.textContent = `신호등 적용 완료: 정방향 ${r.nf}곳 · 회차 ${r.nb}곳 (주변 ${nodes.length}곳 중, 기기에 저장됨)`; osmStatusEl.style.color = 'var(--green)';
+      osmStatusEl.textContent = `신호등 적용 완료: 정방향 ${r.nf}곳 · 회차 ${r.nb}곳 (주변 ${nodes.length}곳 중, 기기에 저장됨) — 정방향: ` + ROUTE_FORWARD.filter(w=>w.type==='light').map(w=>shortName(w.name,8)).join(' · '); osmStatusEl.style.color = 'var(--green)';
     }
     return true;
   }catch(err){
@@ -1406,6 +1409,20 @@ async function fetchOsmLights(){
   }
 }
 document.getElementById('osmFetchBtn').addEventListener('click', fetchOsmLights);
+/* 지도에 없는 신호등: 신호 앞에서 누르면 지금 GPS 위치를 신호등으로 저장 (기기에 영구 저장) */
+document.getElementById('addSigBtn').addEventListener('click', ()=>{
+  const btn = document.getElementById('addSigBtn');
+  const flash = t=>{ const o = btn.textContent; btn.textContent = t; setTimeout(()=>{ btn.textContent = '＋신호등'; }, 2200); };
+  if (!lastRaw || (Date.now() - lastRaw.ts) > 15000){ flash('GPS 대기'); return; }
+  const m = loadJSON(MANUAL_KEY); const list = Array.isArray(m.list) ? m.list : [];
+  if (list.some(n=>haversineM(n[0],n[1],lastRaw.lat,lastRaw.lng) < 40)){ flash('이미 있음'); return; }
+  list.push([lastRaw.lat, lastRaw.lng, '직접 추가 신호']);
+  saveJSON(MANUAL_KEY, { list });
+  const c = loadJSON(OSM_KEY);
+  applyOsmLights(Array.isArray(c.nodes) ? c.nodes : []);
+  refreshWaypointsKeepState(); renderStopMatchList(); renderMatchList();
+  flash('추가됨 ✓');
+});
 document.getElementById('osmClearBtn').addEventListener('click', ()=>{
   saveJSON(OSM_KEY, {}); revertLights();
   refreshWaypointsKeepState(); renderStopMatchList(); renderMatchList();
@@ -1481,8 +1498,8 @@ prepBase();
 const savedCoordCount = loadCoords();
 shareSameIdCoords();
 const osmCache = loadJSON(OSM_KEY);
-if (savedCoordCount && Array.isArray(osmCache.nodes) && osmCache.nodes.length){
-  const r0 = applyOsmLights(osmCache.nodes);
+if (savedCoordCount && ((Array.isArray(osmCache.nodes) && osmCache.nodes.length) || manualNodes().length)){
+  const r0 = applyOsmLights(Array.isArray(osmCache.nodes) ? osmCache.nodes : []);
   osmStatusEl.textContent = `저장된 신호등 적용: 정방향 ${r0.nf}곳 · 회차 ${r0.nb}곳`; osmStatusEl.style.color = 'var(--green)';
 }
 resetRoute();
